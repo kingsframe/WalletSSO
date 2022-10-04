@@ -7,6 +7,7 @@ import {
 } from "firebase/auth";
 import type { NextPage } from "next";
 import { useEffect, useState } from "react";
+import { WalletConnectionProvider } from "../components/wallets/WalletConnectionProvider";
 import styles from "../styles/Home.module.css";
 import { firebaseConfig } from "../utils/FirebaseConfig";
 
@@ -40,27 +41,29 @@ const Home: NextPage = () => {
   };
 
   return (
-    <div className={styles.container}>
-      <div>
-        <label>Enter your email: </label>
-        <input
-          type="text"
-          name="name"
-          id="name"
-          onChange={(e) => setemail(e.target.value)}
-        />
+    <WalletConnectionProvider>
+      <div className={styles.container}>
+        <div>
+          <label>Enter your email: </label>
+          <input
+            type="text"
+            name="name"
+            id="name"
+            onChange={(e) => setemail(e.target.value)}
+          />
+        </div>
+        <div>
+          <label>Enter your password: </label>
+          <input
+            type="text"
+            name="email"
+            id="email"
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </div>
+        <button onClick={loginEmailPassword}>Log In</button>
       </div>
-      <div>
-        <label>Enter your password: </label>
-        <input
-          type="text"
-          name="email"
-          id="email"
-          onChange={(e) => setPassword(e.target.value)}
-        />
-      </div>
-      <button onClick={loginEmailPassword}>Log In</button>
-    </div>
+    </WalletConnectionProvider>
   );
 };
 
