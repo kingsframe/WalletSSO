@@ -25,8 +25,6 @@ const saveSigninAttempt = async (attempt: AttemptT) => {
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
   connectFirestoreEmulator(db, "localhost", 8080);
-  // const docRef = db.doc(`signinattempts/${attempt.pubkey}`);
-  // await docRef.set(attempt);
   try {
     const docRef = await addDoc(collection(db, "signinattempts"), {
       pubkey: attempt.pubkey,
