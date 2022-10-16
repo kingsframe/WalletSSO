@@ -39,5 +39,5 @@ next-env.d.ts
 .yarn
 
 # firebase logs
-firebase-debug.log
-firestore-debug.log
+**/firestore-debug.log
+**/firebase-debug.log

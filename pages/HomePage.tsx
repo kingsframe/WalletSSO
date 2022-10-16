@@ -2,7 +2,10 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import type { NextPage } from "next";
 import { useCallback, useEffect } from "react";
 
-const requestUrl = "/api/solana-auth/getauthchallenge";
+const requestUrl =
+  "http://localhost:10001/walletsso/us-central1/getauthchallenge";
+const callbackUrl =
+  "http://localhost:10001/walletsso/us-central1/completeauthchallenge";
 const domain = "example.xyz";
 const nonceStr = (nonce: string) => `|| id=${nonce}`;
 export const signInMessage = (nonce: string, domain: string) =>
@@ -18,7 +21,6 @@ const HomePage: NextPage = () => {
         .then((resp) => resp.json())
         .then((data) => data);
 
-      console.log("nonce: ", nonce);
       if (!signMessage) throw new Error("Wallet does not support signing");
 
       // TODO: Abstract into user defined message
@@ -30,6 +32,17 @@ const HomePage: NextPage = () => {
       // sign with the wallet
       const signature = await signMessage(encodedMsg);
       console.log("signature: ", signature);
+
+      // complete the authorization
+      const callbackData = await fetch(
+        callbackUrl +
+          "?" +
+          new URLSearchParams({
+            pubkey: publicKey!.toString(),
+            payload: message,
+            signature: Array.from(signature).toString(),
+          })
+      ).then((resp) => resp.json());
     } catch (e) {
       console.error("Authentication failed");
     }
