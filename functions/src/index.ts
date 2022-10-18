@@ -155,7 +155,7 @@ export const completeauthchallenge = functions.https.onRequest(
         throw new Error("invalid signature");
       }
 
-      const token = await admin.auth.generateToken(pubkey);
+      const token = await admin.auth().createCustomToken(pubkey);
       // send the sign in state back to the client
       response.status(200).json({ token });
     } catch (err) {
