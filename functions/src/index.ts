@@ -1,3 +1,6 @@
+import * as base58 from "bs58";
+import * as util from "tweetnacl-util";
+import { sign } from "tweetnacl";
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import { randomBytes, secretbox } from "tweetnacl";
@@ -8,19 +11,23 @@ type AttemptT = {
   nonce: string;
   ttl: number;
 };
+
 admin.initializeApp();
+const AUTH_DOMAIN = process.env.AUTH_DOMAIN || "";
 
 const saveSigninAttempt = async (attempt: AttemptT) => {
   try {
     const writeResult = await admin
       .firestore()
       .collection("signinattempts")
-      .add({
+      .doc(attempt.pubkey)
+      .set({
         pubkey: attempt.pubkey,
         nonce: attempt.nonce,
         ttl: attempt.ttl,
       });
-    functions.logger.log("Document written with ID: ", writeResult.id);
+
+    functions.logger.log("Document written result: ", writeResult);
   } catch (e) {
     functions.logger.error("Error adding document: ", e);
   }
@@ -38,43 +45,65 @@ const getNonce = async (pubkey: string) => {
   return nonce;
 };
 
-const sanitizeRequestQuery = (query: any) => {
-  const { pubkey, payload, signature } = query;
-  const returnParams: {
-    missingFields: boolean;
-    pubkey: string;
-    payload: string;
-    signature: string | string[];
-  } = {
-    missingFields: true,
-    pubkey: "",
-    payload: "",
-    signature: "",
-  };
-
-  if (
-    pubkey === undefined ||
-    payload === undefined ||
-    signature === undefined
-  ) {
-    return returnParams;
+const getTLL = async (pubkey: string) => {
+  try {
+    const snapshot = await admin
+      .firestore()
+      .collection("signinattempts")
+      .doc(pubkey)
+      .get();
+    functions.logger.log("snapshot retrieved ", snapshot);
+    return snapshot.data()?.tll;
+  } catch (e) {
+    functions.logger.error("Error adding document: ", e);
   }
-
-  returnParams.missingFields = false;
-  returnParams.pubkey = pubkey.toString();
-  returnParams.payload = payload.toString();
-  returnParams.signature = signature;
-  return returnParams;
+  return;
 };
 
-const getAuthChallengeSchema = z.object({
-  query: z.object({ pubkey: z.string() }),
-});
+const verifyTTL = async (pubkey: string) => {
+  const ttl = await getTLL(pubkey);
+  if (ttl < +new Date()) {
+    return false;
+  }
+  return true;
+};
 
+const parsePayload = (pl: string): { nonce: string; domain: string } => {
+  const PAYLOAD_ERROR_MSG =
+    "Incorrect message format. Cannot verify nonce or domain.";
+  const nonce = pl.substring(pl.indexOf("id=") + 3);
+
+  const msg = "Sign this message to sign into ";
+  if (pl.indexOf(msg) !== 0) {
+    throw new Error(PAYLOAD_ERROR_MSG);
+  }
+  const domain = pl.substring(msg.length, pl.indexOf("||")).trim();
+
+  return { nonce, domain };
+};
+
+const nonceStr = (nonce: string) => `|| id=${nonce}`;
+const signInMessage = (nonce: string, domain: string) =>
+  "Sign this message to sign into " + domain + nonceStr(nonce);
+
+/**
+ * Function to take a query param to a Uint8Array
+ * @param qp
+ * @returns Uint8Array to pass to tweetnacl functions
+ */
+const qptua = (qp: string | string[]) =>
+  Uint8Array.from(
+    qp
+      .toString()
+      .split(",")
+      .map((e) => parseInt(e))
+  );
+
+const getauthchallengeQuerySchema = z.object({ pubkey: z.string() });
 export const getauthchallenge = functions.https.onRequest(
   async (request, response) => {
-    const authChallengeResult = getAuthChallengeSchema.parse(request);
-    const pubkey = authChallengeResult.query.pubkey;
+    const sanitizedQuery = getauthchallengeQuerySchema.parse(request.query);
+    const pubkey = sanitizedQuery.pubkey;
     if (pubkey) {
       const nonce = await getNonce(pubkey.toString());
       response.json({ nonce });
@@ -84,18 +113,51 @@ export const getauthchallenge = functions.https.onRequest(
   }
 );
 
+const completeauthchallengeQuerySchema = z.object({
+  pubkey: z.string(),
+  payload: z.string(),
+  signature: z.string(),
+});
 export const completeauthchallenge = functions.https.onRequest(
   async (request, response) => {
     try {
-      // parse the query parameters
-      const { missingFields, pubkey, payload, signature } =
-        sanitizeRequestQuery(request.query);
-      if (missingFields) {
-        throw new Error("missing required fields!");
+      const sanitizedQuery = completeauthchallengeQuerySchema.parse(
+        request.query
+      );
+      const { pubkey, payload, signature } = sanitizedQuery;
+
+      //   verify the TLL
+      const ttlVerified = await verifyTTL(pubkey);
+      if (!ttlVerified) throw new Error("Nonce is expired");
+
+      // get the nonce from the database
+      const dbNonce = await getNonce(pubkey);
+      if (!dbNonce) throw new Error("Public Key not in DB");
+
+      const { nonce, domain } = parsePayload(payload);
+
+      // verify the payload
+      const constructedMessage = signInMessage(nonce, domain);
+
+      if (domain !== AUTH_DOMAIN) {
+        throw new Error("AUTH_DOMAIN does not match domain sent from client");
       }
-      // verify the TLL
-      //   const ttlVerified = await verifyTTL(pubkey);
-      //   if (!ttlVerified) throw new Error("Nonce is expired");
+
+      if (constructedMessage !== payload) throw new Error("Invalid payload");
+
+      if (nonce !== dbNonce) throw new Error("Nonce is invalid");
+
+      const decodePayload = util.decodeUTF8(payload);
+      const publicKey = base58.decode(pubkey);
+
+      // verify that the bytes were signed witht the private key
+      if (!sign.detached.verify(decodePayload, qptua(signature), publicKey)) {
+        throw new Error("invalid signature");
+      }
+
+      const token = await admin.auth.generateToken(pubkey);
+      // send the sign in state back to the client
+      response.status(200).json({ token });
     } catch (err) {
       response.status(400).json({ token: undefined, message: err });
     }

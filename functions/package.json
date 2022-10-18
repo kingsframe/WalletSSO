@@ -15,9 +15,11 @@
   },
   "main": "lib/index.js",
   "dependencies": {
+    "bs58": "^5.0.0",
     "firebase-admin": "^10.0.2",
     "firebase-functions": "^3.18.0",
     "tweetnacl": "^1.0.3",
+    "tweetnacl-util": "^0.15.1",
     "zod": "^3.19.1"
   },
   "devDependencies": {
