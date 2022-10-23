@@ -1,6 +1,6 @@
 import { useWallet } from "@solana/wallet-adapter-react";
 import type { NextPage } from "next";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 const requestUrl =
   "http://localhost:10001/walletsso/us-central1/getauthchallenge";
@@ -14,6 +14,8 @@ export const signInMessage = (nonce: string, domain: string) =>
 const HomePage: NextPage = () => {
   const { publicKey, signMessage, connect, wallet, connected, disconnect } =
     useWallet();
+
+  const [authToken, setAuthToken] = useState<string | undefined>();
 
   const authenticate = useCallback(async () => {
     try {
@@ -34,7 +36,7 @@ const HomePage: NextPage = () => {
       console.log("signature: ", signature);
 
       // complete the authorization
-      const callbackData = await fetch(
+      const response = await fetch(
         callbackUrl +
           "?" +
           new URLSearchParams({
@@ -42,7 +44,10 @@ const HomePage: NextPage = () => {
             payload: message,
             signature: Array.from(signature).toString(),
           })
-      ).then((resp) => resp.json());
+      );
+      const { token } = await response.json();
+      console.log("token: ", token);
+      setAuthToken(token);
     } catch (e) {
       console.error("Authentication failed");
     }

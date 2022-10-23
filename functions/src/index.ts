@@ -13,7 +13,7 @@ type AttemptT = {
 };
 
 admin.initializeApp();
-const AUTH_DOMAIN = process.env.AUTH_DOMAIN || "";
+const AUTH_DOMAIN = "example.xyz";
 
 const saveSigninAttempt = async (attempt: AttemptT) => {
   try {
@@ -45,15 +45,15 @@ const getNonce = async (pubkey: string) => {
   return nonce;
 };
 
-const getTLL = async (pubkey: string) => {
+const getSigninAttempts = async (pubkey: string) => {
   try {
     const snapshot = await admin
       .firestore()
       .collection("signinattempts")
       .doc(pubkey)
       .get();
-    functions.logger.log("snapshot retrieved ", snapshot);
-    return snapshot.data()?.tll;
+    functions.logger.log("signing attemps retrieved ", snapshot.data());
+    return snapshot.data();
   } catch (e) {
     functions.logger.error("Error adding document: ", e);
   }
@@ -61,8 +61,8 @@ const getTLL = async (pubkey: string) => {
 };
 
 const verifyTTL = async (pubkey: string) => {
-  const ttl = await getTLL(pubkey);
-  if (ttl < +new Date()) {
+  const signinAttempt = await getSigninAttempts(pubkey);
+  if (signinAttempt?.ttl < +new Date()) {
     return false;
   }
   return true;
@@ -128,27 +128,44 @@ export const completeauthchallenge = functions.https.onRequest(
 
       //   verify the TLL
       const ttlVerified = await verifyTTL(pubkey);
+      functions.logger.log("ttl verified: ", ttlVerified);
       if (!ttlVerified) throw new Error("Nonce is expired");
 
       // get the nonce from the database
-      const dbNonce = await getNonce(pubkey);
+      const signinAttempt = await getSigninAttempts(pubkey);
+      const dbNonce = signinAttempt?.nonce;
+      functions.logger.log("db nonce: ", dbNonce);
       if (!dbNonce) throw new Error("Public Key not in DB");
 
       const { nonce, domain } = parsePayload(payload);
 
       // verify the payload
       const constructedMessage = signInMessage(nonce, domain);
+      functions.logger.log("constructed message: ", constructedMessage);
 
       if (domain !== AUTH_DOMAIN) {
+        functions.logger.log(
+          "AUTH_DOMAIN does not match domain sent from client"
+        );
+        functions.logger.log("domain: ", domain);
+        functions.logger.log("AUTH_DOMAIN: ", AUTH_DOMAIN);
         throw new Error("AUTH_DOMAIN does not match domain sent from client");
       }
 
-      if (constructedMessage !== payload) throw new Error("Invalid payload");
+      if (constructedMessage !== payload) {
+        functions.logger.log("Invalid payload");
+        throw new Error("Invalid payload");
+      }
 
-      if (nonce !== dbNonce) throw new Error("Nonce is invalid");
+      if (nonce !== dbNonce) {
+        functions.logger.log("Nonce is invalid");
+        throw new Error("Nonce is invalid");
+      }
 
       const decodePayload = util.decodeUTF8(payload);
       const publicKey = base58.decode(pubkey);
+      functions.logger.log("decodePayload: ", decodePayload);
+      functions.logger.log("decoded publickey: ", publicKey);
 
       // verify that the bytes were signed witht the private key
       if (!sign.detached.verify(decodePayload, qptua(signature), publicKey)) {
@@ -156,6 +173,7 @@ export const completeauthchallenge = functions.https.onRequest(
       }
 
       const token = await admin.auth().createCustomToken(pubkey);
+      functions.logger.log("token: ", token);
       // send the sign in state back to the client
       response.status(200).json({ token });
     } catch (err) {
